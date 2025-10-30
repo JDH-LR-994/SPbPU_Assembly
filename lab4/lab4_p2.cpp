@@ -23,7 +23,7 @@ int main(){
   for (volatile std::size_t i = 0; i < iterations; i++){
     // mov eax, 100 нужно, чтобы компилятор не оптимизировал этот блок (иначе время может выйти со знаком -)
     __asm {
-      mov eax, 100
+      mov rax, 100
       add eax, ebx
     }
   }
@@ -45,7 +45,7 @@ int main(){
   for (volatile std::size_t i = 0; i < iterations; i++){
     // Ситуация с mov аналогична, только здесь отрицательных чисел не возникнет
     __asm {
-      mov eax, 100
+      mov rax, 100    
       add rax, [rbx + rsi + 20]
       }
   }
@@ -62,7 +62,7 @@ int main(){
   for (volatile std::size_t i = 0; i < iterations; i++){
     
     __asm {
-      mov eax, 100
+      mov rax, 100      
       add rax, [rbx]
       }
   }
