@@ -1,74 +1,129 @@
 #include <csetjmp>
 #include <csignal>
+#include <cstring>
 #include <iostream>
 #include <termios.h>
 #include <unistd.h>
 
-jmp_buf
-    div_zero_env; // массив, в котором лежит информация для восстановления среды
-struct sigaction old_sigusr1, old_sigfpe; // изменение действий процесса, при
-                                          // получении соответствующего сигнала
+jmp_buf div_zero_env;
+struct sigaction old_sigusr1, old_sigfpe;
 
-// Обработчик для пользовательского сигнала (аналог int 0xF0)
 void sigusr1_handler(int sig) {
-  std::cout << "my interrupt\n";
+  std::cout << "=== Обработчик SIGUSR1 вызван ===" << std::endl;
+  std::cout << "Получен сигнал: " << sig << " (SIGUSR1)" << std::endl;
+  std::cout << "PID процесса: " << getpid() << std::endl;
+  std::cout << "Нажмите Enter для продолжения...";
   getchar();
+  std::cout << "=== Выход из обработчика SIGUSR1 ===" << std::endl;
 }
 
-// Обработчик для деления на ноль (сигнал 8, информация о сигнале, контекст
-// (регистры, состояние процессора)) FPE - floating - point exception
 void sigfpe_handler(int sig, siginfo_t *info, void *context) {
-  std::cout << "my div by zero\n";
+  std::cout << "=== Обработчик SIGFPE вызван ===" << std::endl;
+  std::cout << "Получен сигнал: " << sig << " (SIGFPE)" << std::endl;
+  std::cout << "Код ошибки: " << info->si_code << std::endl;
+  std::cout << "Адрес ошибки: " << info->si_addr << std::endl;
 
-  // Восстанавливаем контекст, сохранённый в div_zero_env (1 - параметр, который
-  // вернёт sigsetjmp)
+  // Расшифровка кода ошибки
+  const char *error_desc = "Неизвестная ошибка";
+  switch (info->si_code) {
+  case FPE_INTDIV:
+    error_desc = "Целочисленное деление на ноль";
+    break;
+  case FPE_INTOVF:
+    error_desc = "Целочисленное переполнение";
+    break;
+  case FPE_FLTDIV:
+    error_desc = "Деление floating point на ноль";
+    break;
+  case FPE_FLTOVF:
+    error_desc = "Переполнение floating point";
+    break;
+  case FPE_FLTUND:
+    error_desc = "Потеря точности floating point";
+    break;
+  case FPE_FLTRES:
+    error_desc = "Некорректный результат floating point";
+    break;
+  case FPE_FLTINV:
+    error_desc = "Некорректная операция floating point";
+    break;
+  }
+  std::cout << "Описание: " << error_desc << std::endl;
+
+  std::cout << "Выполняем восстановление через siglongjmp..." << std::endl;
   siglongjmp(div_zero_env, 1);
 }
 
 void first_task() {
-  // Генерируем пользовательский сигнал вместо int 0xF0
+  std::cout << "\n--- Задача 1: Генерация SIGUSR1 ---" << std::endl;
+  std::cout << "Вызов raise(SIGUSR1)..." << std::endl;
   raise(SIGUSR1);
+  std::cout << "Возврат из обработчика сигнала" << std::endl;
 }
 
 void second_task() {
-  // Вернёт 0 при первом вызове
-  if (sigsetjmp(div_zero_env, 1) == 0) {
+  std::cout << "\n--- Задача 2: Деление на ноль ---" << std::endl;
+
+  // Устанавливаем точку возврата
+  int jmp_val = sigsetjmp(div_zero_env, 1);
+
+  if (jmp_val == 0) {
+    std::cout << "Первая попытка: готовимся к делению на ноль" << std::endl;
     int a = 5;
     int b = 0;
-    int res = a / b; // Вызовет SIGFPE  (уходим в sigfpe_handler)
+    std::cout << "Вычисляем: " << a << " / " << b << std::endl;
+    int res = a / b; // Это вызовет SIGFPE
+    // Сюда мы никогда не попадем при первой попытке
+    std::cout << "Результат: " << res << std::endl;
+  } else {
+    std::cout << "Вторая попытка: вернулись через siglongjmp с кодом "
+              << jmp_val << std::endl;
   }
 
-  // Вернулись из sigfpe_handler
-
-  std::cout << "return from div by zero interrupt\n";
+  std::cout << "Продолжение после обработки деления на ноль" << std::endl;
 }
 
 int main() {
-  system("clear"); // Аналог clrscr()
+  std::cout << "=== Программа начала выполнение ===" << std::endl;
+  std::cout << "PID: " << getpid() << std::endl;
 
-  // Настройка обработчика для SIGUSR1
-  struct sigaction new_sigusr1;
-  new_sigusr1.sa_handler = sigusr1_handler; // указатель на функцию
-  sigemptyset(&new_sigusr1.sa_mask); // очищаем маску блокируемых сигналов
-  new_sigusr1.sa_flags = 0;          // Без специальных флагов
-  sigaction(SIGUSR1, &new_sigusr1, &old_sigusr1); // ставим обработчик
+  // Настройка обработчика SIGUSR1
+  struct sigaction sa_usr1;
+  sa_usr1.sa_handler = sigusr1_handler;
+  sigemptyset(&sa_usr1.sa_mask);
+  sa_usr1.sa_flags = 0;
 
-  // Настройка обработчика для SIGFPE (деление на ноль)
-  struct sigaction new_sigfpe;
-  new_sigfpe.sa_sigaction = sigfpe_handler; // Расширенный обработчик
-  sigemptyset(&new_sigfpe.sa_mask);
-  new_sigfpe.sa_flags = SA_SIGINFO; // Для доп информации
-  sigaction(SIGFPE, &new_sigfpe, &old_sigfpe);
+  if (sigaction(SIGUSR1, &sa_usr1, &old_sigusr1) == -1) {
+    std::cerr << "Ошибка установки обработчика SIGUSR1: " << strerror(errno)
+              << std::endl;
+    return 1;
+  }
 
+  // Настройка обработчика SIGFPE с дополнительной информацией
+  struct sigaction sa_fpe;
+  sa_fpe.sa_sigaction = sigfpe_handler;
+  sigemptyset(&sa_fpe.sa_mask);
+  sa_fpe.sa_flags = SA_SIGINFO;
+
+  if (sigaction(SIGFPE, &sa_fpe, &old_sigfpe) == -1) {
+    std::cerr << "Ошибка установки обработчика SIGFPE: " << strerror(errno)
+              << std::endl;
+    return 1;
+  }
+
+  // Выполнение задач
   first_task();
   second_task();
 
-  std::cout << "return main\n";
+  std::cout << "\n=== Возврат в main ===" << std::endl;
 
-  // Восстановление оригинальных обработчиков
+  // Восстановление обработчиков
   sigaction(SIGUSR1, &old_sigusr1, NULL);
   sigaction(SIGFPE, &old_sigfpe, NULL);
 
+  std::cout << "Оригинальные обработчики восстановлены" << std::endl;
+  std::cout << "Нажмите Enter для выхода...";
   getchar();
+
   return 0;
 }
